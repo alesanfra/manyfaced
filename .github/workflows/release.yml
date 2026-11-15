@@ -1,15 +1,24 @@
 name: Release
 
 # On a v* tag: take the wheels and the sdist of the Wheels run on main for the tagged commit (no
-# new build), create the GitHub Release with them, then publish them to PyPI. The PyPI job is
-# disabled (`if: false`) until PyPI trusted publishing is configured. See docs/development.md,
-# "Release".
+# new build), create the GitHub Release with them, then publish them to PyPI (trusted
+# publishing). A manual run does the same for an existing tag; a release that already exists is
+# kept. See docs/development.md, "Release".
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v* tag to release (for example v0.1.1)
+        required: true
+        type: string
 
 permissions:
   contents: read
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   github-release:
@@ -27,10 +36,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          id=$(gh run list --workflow wheels.yml --branch main --event push --commit "$GITHUB_SHA" \
+          sha=$(gh api "repos/$GH_REPO/commits/$TAG" --jq .sha)
+          echo "$TAG -> $sha"
+          id=$(gh run list --workflow wheels.yml --branch main --event push --commit "$sha" \
             --limit 1 --json databaseId --jq '.[0].databaseId // empty')
           if [[ -z $id ]]; then
-            echo "::error::no Wheels run on main for $GITHUB_SHA: push the commit to main first"
+            echo "::error::no Wheels run on main for $sha: push the commit to main first"
             exit 1
           fi
           echo "Wheels run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$id"
@@ -49,23 +60,26 @@ jobs:
           merge-multiple: true
       - name: Check the version
         run: |
-          version=${GITHUB_REF_NAME#v}
+          version=${TAG#v}
           ls -l dist
           ls dist/manyfaced-"$version".tar.gz > /dev/null || {
-            echo "::error::tag $GITHUB_REF_NAME does not match the version in Cargo.toml"
+            echo "::error::tag $TAG does not match the version in Cargo.toml"
             exit 1
           }
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes --title "$GITHUB_REF_NAME"
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "release $TAG already exists: kept as it is"
+          else
+            gh release create "$TAG" dist/* --verify-tag --generate-notes --title "$TAG"
+          fi
 
   pypi:
     name: Publish to PyPI
     needs: github-release
-    # Remove this line to publish to PyPI (docs/development.md, "Release").
-    if: false
     runs-on: ubuntu-24.04
     environment:
       name: pypi

@@ -67,20 +67,18 @@ the wheels and does a smoke test on them. The jobs make these packages:
 ### Release
 
 File: `.github/workflows/release.yml`. It runs on `v*` tags and does not build again. It takes the
-artifacts of the Wheels run on `main` for the tagged commit (it waits if the run is still going)
-and creates the GitHub Release with them. The PyPI job is disabled (`if: false`).
+artifacts of the Wheels run on `main` for the tagged commit (it waits if the run is still going),
+creates the GitHub Release with them and publishes them to PyPI with trusted publishing
+(environment `pypi`).
 
 To make a release:
 
 1. Make sure that `version` in `Cargo.toml` is correct. maturin uses it as the Python version.
 2. Push the commit to `main`.
-3. Tag that commit and push the tag: `git tag v0.1.0 && git push origin v0.1.0`.
+3. Tag that commit and push the tag: `git tag v0.1.1 && git push origin v0.1.1`.
 
-To also publish to PyPI, one time:
-
-1. On PyPI, add a pending trusted publisher: project `manyfaced`, this repository, workflow
-   `release.yml`, environment `pypi`.
-2. On GitHub, create the `pypi` environment.
-3. In `release.yml`, remove the line `if: false`.
+To publish an existing tag again (for example after a failed PyPI upload), start the workflow
+manually: **Actions → Release → Run workflow**, with the tag as input. A GitHub Release that
+already exists is kept.
 
 Nothing is published to crates.io.
