@@ -452,8 +452,8 @@ mod tests {
     fn reconstruct(s: &Svd) -> Mat {
         let mut uw = s.u.clone();
         for r in 0..uw.rows {
-            for c in 0..uw.cols {
-                let val = uw.get(r, c) * s.w[c];
+            for (c, &w) in s.w.iter().enumerate().take(uw.cols) {
+                let val = uw.get(r, c) * w;
                 uw.set(r, c, val);
             }
         }

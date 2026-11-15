@@ -1,0 +1,16 @@
+name: Download models
+description: >-
+  Download the dlib models into models/ (cached, verified by SHA-256) and copy the bundled
+  ones into python/manyfaced/_models/, so that the wheels built afterwards contain them.
+  Needs uv (astral-sh/setup-uv).
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v4
+      with:
+        path: models
+        # _model_files.py holds the names, URLs and SHA-256 of the models.
+        key: dlib-models-${{ hashFiles('python/manyfaced/_model_files.py') }}
+        enableCrossOsArchive: true
+    - shell: bash
+      run: uv run --no-project tools/download_models.py --bundle

@@ -1,0 +1,6 @@
+# x86_64 builds (wheels and source builds) target x86-64-v3 (AVX2, FMA, BMI2). Without it,
+# f32::mul_add compiles to a libm call that takes 14-30% of the detector time. Older CPUs get an
+# ImportError from python/manyfaced/_cpu.py instead of an illegal instruction.
+# See docs/internals.md, "x86-64-v3 baseline". A RUSTFLAGS environment variable replaces this.
+[target.'cfg(target_arch = "x86_64")']
+rustflags = ["-C", "target-cpu=x86-64-v3"]

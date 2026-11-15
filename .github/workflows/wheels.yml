@@ -1,0 +1,196 @@
+name: Wheels
+
+# Builds every wheel and the sdist, and smoke-tests each wheel. See docs/development.md, "Wheels".
+# Other code changes do not start this workflow: after a change to platform-specific code, start
+# it manually (Actions -> Wheels -> Run workflow). release.yml publishes the artifacts of a run.
+on:
+  push:
+    tags: ["v*"]
+    branches: [main]
+    paths:
+      - pyproject.toml
+      - Cargo.toml
+      - Cargo.lock
+      - crates/*/Cargo.toml
+      - .cargo/config.toml
+      - python/manyfaced/_model_files.py
+      - python/manyfaced/_cpu.py
+      - .github/workflows/wheels.yml
+      - .github/actions/models/**
+      - .github/scripts/smoke_test.py
+  pull_request:
+    paths:
+      - pyproject.toml
+      - Cargo.toml
+      - Cargo.lock
+      - crates/*/Cargo.toml
+      - .cargo/config.toml
+      - python/manyfaced/_model_files.py
+      - python/manyfaced/_cpu.py
+      - .github/workflows/wheels.yml
+      - .github/actions/models/**
+      - .github/scripts/smoke_test.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  CARGO_TERM_COLOR: always
+  UV_PYTHON_PREFERENCE: only-managed
+
+jobs:
+  linux:
+    name: ${{ matrix.libc }} ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        libc: [manylinux, musllinux]
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+          - libc: manylinux
+            policy: "2_28"
+          - libc: musllinux
+            policy: musllinux_1_2
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+      - name: Download models
+        uses: ./.github/actions/models
+      - name: Build
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.arch }}
+          manylinux: ${{ matrix.policy }}
+          args: --release --out dist
+      - name: Smoke test (manylinux)
+        if: matrix.libc == 'manylinux'
+        run: |
+          uv venv --python 3.11 /tmp/smoke
+          uv pip install --python /tmp/smoke dist/*.whl
+          cd /tmp && /tmp/smoke/bin/python "$GITHUB_WORKSPACE/.github/scripts/smoke_test.py"
+      - name: Smoke test (musllinux)
+        if: matrix.libc == 'musllinux'
+        run: >-
+          docker run --rm -v "$PWD:/io:ro" -w /tmp python:3.13-alpine sh -ec
+          'pip install --root-user-action=ignore /io/dist/*.whl && python /io/.github/scripts/smoke_test.py'
+      - uses: actions/upload-artifact@v5
+        with:
+          name: wheels-${{ matrix.libc }}-${{ matrix.arch }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  macos:
+    name: macOS arm64 and x86_64
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: astral-sh/setup-uv@v7
+      - name: Download models
+        uses: ./.github/actions/models
+      - name: Build arm64
+        run: uvx --from 'maturin>=1.15,<2' maturin build --release --target aarch64-apple-darwin --out dist
+      - name: Build x86_64
+        run: uvx --from 'maturin>=1.15,<2' maturin build --release --target x86_64-apple-darwin --out dist
+      - name: Smoke test arm64
+        run: |
+          uv venv --python cpython-3.11-macos-aarch64 /tmp/smoke-arm64
+          uv pip install --python /tmp/smoke-arm64 dist/*arm64.whl
+          cd /tmp && /tmp/smoke-arm64/bin/python "$GITHUB_WORKSPACE/.github/scripts/smoke_test.py"
+      # Rosetta does not show AVX2 and FMA in CPUID, so the CPU check must be off
+      # (docs/internals.md, "x86-64-v3 baseline").
+      - name: Smoke test x86_64 (Rosetta)
+        env:
+          MANYFACED_SKIP_CPU_CHECK: "1"
+        run: |
+          uv venv --python cpython-3.11-macos-x86_64 /tmp/smoke-x86_64
+          uv pip install --python /tmp/smoke-x86_64 dist/*x86_64.whl
+          cd /tmp && arch -x86_64 /tmp/smoke-x86_64/bin/python "$GITHUB_WORKSPACE/.github/scripts/smoke_test.py"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: wheels-macos
+          path: dist/*.whl
+          if-no-files-found: error
+
+  windows:
+    name: Windows ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            python: cpython-3.11-windows-x86_64
+          - arch: arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            python: cpython-3.11-windows-aarch64
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: astral-sh/setup-uv@v7
+      - name: Download models
+        uses: ./.github/actions/models
+      - name: Build
+        run: uvx --from 'maturin>=1.15,<2' maturin build --release --target ${{ matrix.target }} --out dist
+      - name: Smoke test
+        run: |
+          smoke="$RUNNER_TEMP/smoke"
+          uv venv --python ${{ matrix.python }} "$smoke"
+          uv pip install --python "$smoke" dist/*.whl
+          cd "$RUNNER_TEMP" && "$smoke/Scripts/python.exe" "$GITHUB_WORKSPACE/.github/scripts/smoke_test.py"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: wheels-windows-${{ matrix.arch }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  sdist:
+    name: sdist
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v7
+      - name: Download models
+        uses: ./.github/actions/models
+      - name: Build sdist
+        run: uvx --from 'maturin>=1.15,<2' maturin sdist --out dist
+      - name: Check the sdist contents
+        run: |
+          tar tzf dist/*.tar.gz > contents.txt
+          for f in .cargo/config.toml Cargo.lock \
+                   python/manyfaced/_models/shape_predictor_5_face_landmarks.dat \
+                   python/manyfaced/_models/dlib_face_recognition_resnet_model_v1.dat; do
+            grep -q "/$f\$" contents.txt || { echo "missing in sdist: $f"; exit 1; }
+          done
+      # A source build from the sdist, as pip does it on a platform without a wheel.
+      - name: Build and smoke-test a wheel from the sdist
+        run: |
+          uv venv --python 3.11 /tmp/smoke
+          uv pip install --python /tmp/smoke dist/*.tar.gz
+          cd /tmp && /tmp/smoke/bin/python "$GITHUB_WORKSPACE/.github/scripts/smoke_test.py"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error

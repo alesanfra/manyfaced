@@ -1,0 +1,20 @@
+# Rust
+/target/
+
+# Python
+/.venv/
+__pycache__/
+*.py[cod]
+/dist/
+/.pytest_cache/
+/.ruff_cache/
+
+# Native extension built in place by `maturin develop`
+/python/manyfaced/*.so
+/python/manyfaced/*.pyd
+
+# Not committed (licenses and size): see docs/development.md and docs/internals.md
+/third_party/
+/models/
+/python/manyfaced/_models/
+/tests/golden/local/

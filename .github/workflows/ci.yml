@@ -1,0 +1,169 @@
+name: CI
+
+# Layout and costs: docs/development.md, "Continuous integration".
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**", "LICENSE-*", "THIRD_PARTY_NOTICES"]
+  pull_request:
+    paths-ignore: ["**.md", "docs/**", "LICENSE-*", "THIRD_PARTY_NOTICES"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  DLIB_TAG: v20.0.1
+  UV_PYTHON_PREFERENCE: only-managed
+
+jobs:
+  linux:
+    name: Linux (lint, Rust, Python)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+          targets: aarch64-apple-darwin, aarch64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Download models
+        uses: ./.github/actions/models
+
+      # Lint
+      - name: cargo fmt
+        run: cargo fmt --all --check
+      - name: clippy (Linux x86_64)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: clippy (macOS arm64, Accelerate and NEON code)
+        run: cargo clippy --workspace --all-targets --locked --target aarch64-apple-darwin -- -D warnings
+      - name: clippy (Windows arm64)
+        run: cargo clippy --workspace --all-targets --locked --target aarch64-pc-windows-msvc -- -D warnings
+      # The lint group and the runtime dependencies (for the numpy types), without building
+      # manyfaced: ty reads the hand-written stub _manyfaced.pyi.
+      - name: Lint environment
+        run: uv sync --locked --no-install-project --no-default-groups --group lint
+      - name: ruff
+        run: |
+          uv run --no-sync ruff check .
+          uv run --no-sync ruff format --check .
+      - name: ty (package sources)
+        run: uv run --no-sync ty check python
+
+      # Rust
+      # manyfaced-py is a cdylib for the Python wheel; its code runs in the Python tests.
+      - name: cargo test
+        run: cargo test -p manyfaced-core --locked
+      - name: MSRV (rust-version in Cargo.toml)
+        run: |
+          msrv=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)
+          rustup toolchain install "$msrv" --profile minimal
+          cargo "+$msrv" check --workspace --all-targets --locked
+
+      # Python: one abi3 wheel, tested on the lowest and highest supported Python
+      - name: Build the abi3 wheel
+        run: uvx --from 'maturin>=1.15,<2' maturin build --release --out dist
+      - name: Python 3.11
+        run: .github/scripts/pytest-wheel.sh 3.11 -m "not parity"
+      - name: Python 3.15
+        run: .github/scripts/pytest-wheel.sh 3.15 -m "not parity"
+      - name: Python 3.11, lowest dependencies
+        run: .github/scripts/pytest-wheel.sh 3.11 --lowest -m "not parity"
+
+  parity-macos:
+    name: Parity (macOS arm64, live dlib)
+    needs: linux
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Download models
+        uses: ./.github/actions/models
+      - name: Clone dlib
+        run: git clone --depth 1 --branch "$DLIB_TAG" https://github.com/davisking/dlib.git third_party/dlib
+
+      - name: cargo test (Accelerate)
+        run: cargo test -p manyfaced-core --locked
+      - name: cargo test (gemm only)
+        run: cargo test -p manyfaced-core --no-default-features --locked
+
+      - name: Dev environment (builds manyfaced, installs dlib-bin)
+        run: uv sync --locked
+      - name: Chip pixels from dlib
+        run: uv run --no-sync python tools/gen_golden.py chips
+      - uses: actions/upload-artifact@v5
+        with:
+          name: golden-local
+          path: tests/golden/local/
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: pytest (all, with live dlib comparisons)
+        run: uv run --no-sync pytest
+
+  windows:
+    name: Windows x64 (Python)
+    needs: linux
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v7
+      - name: Download models
+        uses: ./.github/actions/models
+      - name: Build the abi3 wheel
+        run: uvx --from 'maturin>=1.15,<2' maturin build --release --out dist
+      - name: Python 3.11
+        run: .github/scripts/pytest-wheel.sh 3.11 -m "not parity"
+      - name: Python 3.15
+        run: .github/scripts/pytest-wheel.sh 3.15 -m "not parity"
+
+  parity-linux:
+    name: Parity (Linux ${{ matrix.arch }})
+    needs: parity-macos
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v7
+      - name: Download models
+        uses: ./.github/actions/models
+      - name: Clone dlib
+        run: git clone --depth 1 --branch "$DLIB_TAG" https://github.com/davisking/dlib.git third_party/dlib
+      - uses: actions/download-artifact@v6
+        with:
+          name: golden-local
+          path: tests/golden/local/
+      - name: Build the abi3 wheel
+        run: uvx --from 'maturin>=1.15,<2' maturin build --release --out dist
+      # No live dlib here: the Linux dlib-bin build differs from the macOS reference
+      # (docs/internals.md). The goldens and the macOS chip pixels are the reference.
+      # Pillow is pinned like the goldens (test_golden_inputs.py checks the decoded pixels).
+      - name: pytest -m parity (goldens only)
+        run: >-
+          .github/scripts/pytest-wheel.sh 3.13 --with pillow==13.0.0 -m parity
+          --ignore=tests/test_compat.py --ignore=tests/test_face_recognition.py
