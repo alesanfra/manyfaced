@@ -55,28 +55,32 @@ does not run when a change has only documentation.
 
 ### Wheels
 
-File: `.github/workflows/wheels.yml`. It runs on `v*` tags, on manual runs and on changes to the
-packaging files. Each job builds the wheels and does a smoke test on them. The jobs make these
-packages:
+File: `.github/workflows/wheels.yml`. It runs on each push to `main` (except documentation-only
+changes), on pull requests that change the packaging files and on manual runs. Each job builds
+the wheels and does a smoke test on them. The jobs make these packages:
 
 - manylinux 2.28 and musllinux 1.2, x86_64 and aarch64.
 - macOS arm64.
 - Windows x64, and Windows arm64 on the native `windows-11-arm` runner.
 - The sdist.
 
-Other changes to the code do not start this workflow. After a change to platform-specific code,
-start it manually: **Actions → Wheels → Run workflow**.
-
 ### Release
 
-File: `.github/workflows/release.yml`. This workflow is disabled, because the maintainer must
-decide when to publish to PyPI. To publish a release, do these steps:
+File: `.github/workflows/release.yml`. It runs on `v*` tags and does not build again. It takes the
+artifacts of the Wheels run on `main` for the tagged commit (it waits if the run is still going)
+and creates the GitHub Release with them. The PyPI job is disabled (`if: false`).
+
+To make a release:
 
 1. Make sure that `version` in `Cargo.toml` is correct. maturin uses it as the Python version.
-2. Push a `v*` tag and make sure that the Wheels run for the tag passes. GitHub keeps the
-   artifacts of tag runs for 30 days.
-3. On PyPI, configure a trusted publisher for this repository and for the `pypi` environment.
-4. In `release.yml`, remove the line `if: false`.
-5. Start the Release workflow manually. Give it the ID of the Wheels run from step 2.
+2. Push the commit to `main`.
+3. Tag that commit and push the tag: `git tag v0.1.0 && git push origin v0.1.0`.
+
+To also publish to PyPI, one time:
+
+1. On PyPI, add a pending trusted publisher: project `manyfaced`, this repository, workflow
+   `release.yml`, environment `pypi`.
+2. On GitHub, create the `pypi` environment.
+3. In `release.yml`, remove the line `if: false`.
 
 Nothing is published to crates.io.

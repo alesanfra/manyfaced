@@ -1,23 +1,12 @@
 name: Wheels
 
-# Builds every wheel and the sdist, and smoke-tests each wheel. See docs/development.md, "Wheels".
-# Other code changes do not start this workflow: after a change to platform-specific code, start
-# it manually (Actions -> Wheels -> Run workflow). release.yml publishes the artifacts of a run.
+# Builds every wheel and the sdist, and smoke-tests each wheel, on each push to main.
+# A v* tag does not build again: release.yml takes the artifacts of the run for the tagged
+# commit. See docs/development.md, "Wheels" and "Release".
 on:
   push:
-    tags: ["v*"]
     branches: [main]
-    paths:
-      - pyproject.toml
-      - Cargo.toml
-      - Cargo.lock
-      - crates/*/Cargo.toml
-      - .cargo/config.toml
-      - python/manyfaced/_model_files.py
-      - python/manyfaced/_cpu.py
-      - .github/workflows/wheels.yml
-      - .github/actions/models/**
-      - .github/scripts/smoke_test.py
+    paths-ignore: ["**.md", "docs/**", "LICENSE-*", "THIRD_PARTY_NOTICES"]
   pull_request:
     paths:
       - pyproject.toml
@@ -35,9 +24,10 @@ on:
 permissions:
   contents: read
 
+# Never cancel a main run (one group per commit): its artifacts are the ones that a tag releases.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
