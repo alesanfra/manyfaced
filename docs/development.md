@@ -1,0 +1,82 @@
+# Development
+
+## Requirements
+
+- A Rust toolchain, version 1.85 or later.
+- [uv](https://docs.astral.sh/uv/).
+
+## Build and test
+
+Do these steps from the root of the repository:
+
+```bash
+git clone --depth 1 --branch v20.0.1 https://github.com/davisking/dlib.git third_party/dlib
+uv run --no-project tools/download_models.py --bundle  # models/ and the bundled copies
+uv sync --locked                                        # dev venv, builds manyfaced with maturin
+uv run --no-sync pytest
+uv run --no-sync maturin develop --release --uv         # rebuild after a change to the Rust code
+```
+
+## Rules and tools
+
+- `third_party/dlib` is the specification. Each algorithm is a port from that tag. Each port keeps
+  the dlib order of floating point operations.
+- The `golden` dependency group installs `dlib-bin`. Only `tools/gen_golden.py` (reference
+  outputs) and `tools/bench.py` use it. manyfaced does not depend on dlib.
+- `pytest -m parity` needs `third_party/dlib` and `models/`.
+- The repository does not contain the face chip pixels, because they are crops of images with
+  unclear licenses. To make them again, run `python tools/gen_golden.py chips`.
+- `tools/cpp_probe/` contains small C++ programs. They use `third_party/dlib` and write the
+  intermediate values of dlib. Use them when a component gives results that are different from
+  dlib.
+- [internals.md](internals.md) gives the dlib details that control parity, the differences
+  between dlib builds and the reasons for the design decisions.
+
+## Continuous integration
+
+The workflows use a small number of Actions minutes. On private repositories, a macOS minute
+costs 10 Linux minutes and a Windows minute costs 2 Linux minutes.
+
+### CI
+
+File: `.github/workflows/ci.yml`. It runs on each push to `main` and on each pull request. It
+does not run when a change has only documentation.
+
+1. One Linux job builds the abi3 wheel one time. It does these checks:
+   - Lint, and clippy for the macOS and Windows on Arm targets.
+   - The Rust tests and the MSRV check.
+   - The Python tests on Python 3.11, on Python 3.15 and on the lowest dependencies.
+2. If the Linux job passes, two jobs start:
+   - `parity-macos` runs the Rust tests with the Accelerate backend. It makes the chip pixels
+     with dlib-bin. Then it runs all of the Python tests, with the live comparisons with dlib.
+   - `windows` runs the Python tests on Python 3.11 and 3.15.
+3. `parity-linux` (x86_64 and aarch64) compares manyfaced with the chip pixels from
+   `parity-macos`.
+
+### Wheels
+
+File: `.github/workflows/wheels.yml`. It runs on `v*` tags, on manual runs and on changes to the
+packaging files. Each job builds the wheels and does a smoke test on them. The jobs make these
+packages:
+
+- manylinux 2.28 and musllinux 1.2, x86_64 and aarch64.
+- macOS arm64 and x86_64 (one job).
+- Windows x64, and Windows arm64 on the native `windows-11-arm` runner.
+- The sdist.
+
+Other changes to the code do not start this workflow. After a change to platform-specific code,
+start it manually: **Actions → Wheels → Run workflow**.
+
+### Release
+
+File: `.github/workflows/release.yml`. This workflow is disabled, because the maintainer must
+decide when to publish to PyPI. To publish a release, do these steps:
+
+1. Make sure that `version` in `Cargo.toml` is correct. maturin uses it as the Python version.
+2. Push a `v*` tag and make sure that the Wheels run for the tag passes. GitHub keeps the
+   artifacts of tag runs for 30 days.
+3. On PyPI, configure a trusted publisher for this repository and for the `pypi` environment.
+4. In `release.yml`, remove the line `if: false`.
+5. Start the Release workflow manually. Give it the ID of the Wheels run from step 2.
+
+Nothing is published to crates.io.

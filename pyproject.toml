@@ -1,0 +1,101 @@
+[build-system]
+requires = ["maturin>=1.15,<2"]
+build-backend = "maturin"
+
+[project]
+name = "manyfaced"
+description = "A Rust port of the dlib face pipeline that reads the original dlib .dat models"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT OR Apache-2.0"
+license-files = ["LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_NOTICES"]
+authors = [{ name = "Alessio Sanfratello" }]
+keywords = ["dlib", "face detection", "face recognition", "facial landmarks", "hog"]
+# 1.23.2 is the first numpy with CPython 3.11 wheels; CI tests these lower bounds.
+dependencies = ["numpy>=1.23.2", "pillow>=10.0.0"]
+dynamic = ["version"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+    "Typing :: Typed",
+]
+
+[dependency-groups]
+# Running the test suite (the parity tests also need third_party/dlib and models/).
+test = ["pytest>=8"]
+# Generating reference outputs with the original dlib. Never a dependency of manyfaced itself.
+# Pillow is pinned because the golden files record digests of the images it decodes.
+golden = ["dlib-bin==20.0.1.post1", "pillow==13.0.0"]
+lint = ["ruff>=0.14", "ty>=0.0.95"]
+# The face_recognition integration test (tests/test_face_recognition.py).
+integration = ["face-recognition==1.3.0", "click>=8"]
+dev = [
+    { include-group = "test" },
+    { include-group = "golden" },
+    { include-group = "lint" },
+    { include-group = "integration" },
+    "maturin>=1.15,<2",
+]
+
+[tool.maturin]
+manifest-path = "crates/manyfaced-py/Cargo.toml"
+python-source = "python"
+module-name = "manyfaced._manyfaced"
+features = ["extension-module"]
+# Build with the committed Cargo.lock; fail instead of silently re-resolving.
+locked = true
+# Source builds get the same x86-64-v3 baseline as the wheels. The bundled models are gitignored
+# (copied by `tools/download_models.py --bundle`), so they must be listed explicitly.
+include = [
+    { path = ".cargo/config.toml", format = "sdist" },
+    { path = "python/manyfaced/_models/*.dat", format = ["sdist", "wheel"] },
+]
+
+[tool.uv]
+# face_recognition depends on `dlib` (built from source with CMake: exactly what manyfaced avoids)
+# and on face_recognition_models (100 MB of the same dlib models, loaded with pkg_resources).
+# The integration test provides both itself (dlib-bin / manyfaced.compat.dlib, and models/), so
+# these markers, which never match, drop them from the resolution.
+override-dependencies = [
+    "dlib; sys_platform == 'never'",
+    "face-recognition-models; sys_platform == 'never'",
+]
+# Rebuild the extension when the Rust sources change (uv sync / uv run).
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "Cargo.toml" },
+    { file = "Cargo.lock" },
+    { file = "crates/**/*.rs" },
+    { file = "crates/**/Cargo.toml" },
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "parity: compares against golden dlib outputs; needs third_party/dlib and the models (see docs/development.md)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["third_party"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "NPY"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["manyfaced", "testimages"]

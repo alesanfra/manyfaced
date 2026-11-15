@@ -1,0 +1,26 @@
+[package]
+name = "manyfaced-py"
+description = "Python bindings for manyfaced-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "_manyfaced"
+crate-type = ["cdylib"]
+
+[dependencies]
+manyfaced-core.workspace = true
+pyo3 = { version = "0.30", features = ["abi3-py311"] }
+numpy = "0.30"
+
+[features]
+default = ["accelerate"]
+extension-module = ["pyo3/extension-module"]
+# macOS only: the face ResNet's matrix products through the system Accelerate framework.
+accelerate = ["manyfaced-core/accelerate"]
+
+[lints]
+workspace = true

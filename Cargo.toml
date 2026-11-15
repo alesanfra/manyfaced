@@ -1,0 +1,34 @@
+[workspace]
+resolver = "3"
+members = ["crates/manyfaced-core", "crates/manyfaced-py"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+manyfaced-core = { path = "crates/manyfaced-core", default-features = false }
+thiserror = "2"
+# gemm selects its SIMD kernels at run time, so the wheels need no target-cpu=native. (The
+# x86-64-v3 baseline in .cargo/config.toml is for the rest of the code.)
+gemm = { version = "0.19", default-features = false, features = ["std"] }
+rayon = "1"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "warn"
+
+# The model tests parse ~130 MB of dlib files many times; unoptimized that takes minutes.
+[profile.test]
+opt-level = 2
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+# panic = "abort" is intentionally NOT set: PyO3 turns Rust panics into Python
+# exceptions by catching the unwind, so aborting would kill the interpreter.

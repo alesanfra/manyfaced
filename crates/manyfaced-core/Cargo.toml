@@ -1,0 +1,25 @@
+[package]
+name = "manyfaced-core"
+description = "Pure Rust port of a subset of dlib, compatible with dlib's .dat model files"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+gemm.workspace = true
+rayon = { workspace = true, optional = true }
+
+[features]
+default = ["accelerate"]
+# On macOS, run the face ResNet's matrix products through the system Accelerate framework
+# (cblas_sgemm, AMX on Apple Silicon). No effect on other platforms.
+accelerate = []
+# Multi-threaded matrix products. Off by default: the Python layer gets its parallelism from
+# Python threads, and the benchmarks measure one thread.
+rayon = ["dep:rayon", "gemm/rayon"]
+
+[lints]
+workspace = true
