@@ -60,7 +60,7 @@ packaging files. Each job builds the wheels and does a smoke test on them. The j
 packages:
 
 - manylinux 2.28 and musllinux 1.2, x86_64 and aarch64.
-- macOS arm64 and x86_64 (one job).
+- macOS arm64.
 - Windows x64, and Windows arm64 on the native `windows-11-arm` runner.
 - The sdist.
 

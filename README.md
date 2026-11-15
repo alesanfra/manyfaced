@@ -64,7 +64,7 @@ manyfaced is not on PyPI at this time. To build it from the source code, refer t
 Wheels are available for these platforms:
 
 - Linux: manylinux 2.28 and musllinux 1.2, x86_64 and aarch64.
-- macOS: arm64 and x86_64.
+- macOS: arm64.
 - Windows: x64 and arm64.
 
 Requirements:

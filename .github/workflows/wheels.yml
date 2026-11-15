@@ -44,8 +44,26 @@ env:
   UV_PYTHON_PREFERENCE: only-managed
 
 jobs:
+  # dlib.net fails (timeouts, truncated files) when many jobs download at the same time.
+  # One job downloads the bundled models (cached); the build jobs get them as an artifact.
+  models:
+    name: Models
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+      - name: Download models
+        uses: ./.github/actions/models
+      - uses: actions/upload-artifact@v5
+        with:
+          name: bundled-models
+          path: python/manyfaced/_models/
+          retention-days: 1
+          if-no-files-found: error
+
   linux:
     name: ${{ matrix.libc }} ${{ matrix.arch }}
+    needs: models
     strategy:
       fail-fast: false
       matrix:
@@ -64,14 +82,19 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v7
-      - name: Download models
-        uses: ./.github/actions/models
+      - uses: actions/download-artifact@v6
+        with:
+          name: bundled-models
+          path: python/manyfaced/_models/
       - name: Build
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.arch }}
           manylinux: ${{ matrix.policy }}
           args: --release --out dist
+          # The build runs in a container, so rust-cache does not apply: sccache keeps the
+          # compiled crates in the GitHub Actions cache.
+          sccache: "true"
       - name: Smoke test (manylinux)
         if: matrix.libc == 'manylinux'
         run: |
@@ -90,42 +113,34 @@ jobs:
           if-no-files-found: error
 
   macos:
-    name: macOS arm64 and x86_64
+    name: macOS arm64
+    needs: models
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
       - uses: astral-sh/setup-uv@v7
-      - name: Download models
-        uses: ./.github/actions/models
-      - name: Build arm64
+      - uses: actions/download-artifact@v6
+        with:
+          name: bundled-models
+          path: python/manyfaced/_models/
+      - name: Build
         run: uvx --from 'maturin>=1.15,<2' maturin build --release --target aarch64-apple-darwin --out dist
-      - name: Build x86_64
-        run: uvx --from 'maturin>=1.15,<2' maturin build --release --target x86_64-apple-darwin --out dist
-      - name: Smoke test arm64
+      - name: Smoke test
         run: |
-          uv venv --python cpython-3.11-macos-aarch64 /tmp/smoke-arm64
-          uv pip install --python /tmp/smoke-arm64 dist/*arm64.whl
-          cd /tmp && /tmp/smoke-arm64/bin/python "$GITHUB_WORKSPACE/.github/scripts/smoke_test.py"
-      # Rosetta does not show AVX2 and FMA in CPUID, so the CPU check must be off
-      # (docs/internals.md, "x86-64-v3 baseline").
-      - name: Smoke test x86_64 (Rosetta)
-        env:
-          MANYFACED_SKIP_CPU_CHECK: "1"
-        run: |
-          uv venv --python cpython-3.11-macos-x86_64 /tmp/smoke-x86_64
-          uv pip install --python /tmp/smoke-x86_64 dist/*x86_64.whl
-          cd /tmp && arch -x86_64 /tmp/smoke-x86_64/bin/python "$GITHUB_WORKSPACE/.github/scripts/smoke_test.py"
+          uv venv --python cpython-3.11-macos-aarch64 /tmp/smoke
+          uv pip install --python /tmp/smoke dist/*.whl
+          cd /tmp && /tmp/smoke/bin/python "$GITHUB_WORKSPACE/.github/scripts/smoke_test.py"
       - uses: actions/upload-artifact@v5
         with:
-          name: wheels-macos
+          name: wheels-macos-arm64
           path: dist/*.whl
           if-no-files-found: error
 
   windows:
     name: Windows ${{ matrix.arch }}
+    needs: models
     strategy:
       fail-fast: false
       matrix:
@@ -147,9 +162,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
       - uses: astral-sh/setup-uv@v7
-      - name: Download models
-        uses: ./.github/actions/models
+      - uses: actions/download-artifact@v6
+        with:
+          name: bundled-models
+          path: python/manyfaced/_models/
       - name: Build
         run: uvx --from 'maturin>=1.15,<2' maturin build --release --target ${{ matrix.target }} --out dist
       - name: Smoke test
@@ -166,13 +184,17 @@ jobs:
 
   sdist:
     name: sdist
+    needs: models
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - uses: astral-sh/setup-uv@v7
-      - name: Download models
-        uses: ./.github/actions/models
+      - uses: actions/download-artifact@v6
+        with:
+          name: bundled-models
+          path: python/manyfaced/_models/
       - name: Build sdist
         run: uvx --from 'maturin>=1.15,<2' maturin sdist --out dist
       - name: Check the sdist contents

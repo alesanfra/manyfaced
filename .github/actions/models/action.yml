@@ -13,4 +13,12 @@ runs:
         key: dlib-models-${{ hashFiles('python/manyfaced/_model_files.py') }}
         enableCrossOsArchive: true
     - shell: bash
-      run: uv run --no-project tools/download_models.py --bundle
+      # dlib.net sometimes times out or sends a truncated file: retry. Each file is checked
+      # against its SHA-256, and the files that are already correct are kept.
+      run: |
+        for attempt in 1 2 3 4 5; do
+          uv run --no-project tools/download_models.py --bundle && exit 0
+          echo "::warning::model download failed (attempt $attempt), retrying"
+          sleep $((attempt * 20))
+        done
+        exit 1

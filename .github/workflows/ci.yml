@@ -90,7 +90,14 @@ jobs:
 
       - name: Download models
         uses: ./.github/actions/models
+      - name: Cache dlib
+        id: dlib-cache
+        uses: actions/cache@v4
+        with:
+          path: third_party/dlib
+          key: dlib-src-${{ env.DLIB_TAG }}
       - name: Clone dlib
+        if: steps.dlib-cache.outputs.cache-hit != 'true'
         run: git clone --depth 1 --branch "$DLIB_TAG" https://github.com/davisking/dlib.git third_party/dlib
 
       - name: cargo test (Accelerate)
@@ -152,7 +159,14 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - name: Download models
         uses: ./.github/actions/models
+      - name: Cache dlib
+        id: dlib-cache
+        uses: actions/cache@v4
+        with:
+          path: third_party/dlib
+          key: dlib-src-${{ env.DLIB_TAG }}
       - name: Clone dlib
+        if: steps.dlib-cache.outputs.cache-hit != 'true'
         run: git clone --depth 1 --branch "$DLIB_TAG" https://github.com/davisking/dlib.git third_party/dlib
       - uses: actions/download-artifact@v6
         with:
